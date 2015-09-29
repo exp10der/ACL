@@ -22,7 +22,7 @@ namespace AclGen
             };
 
             log.Debug(
-                $"Apply Settings: {nameof(settings.CountUserGen)} ={settings.CountUserGen}, {nameof(Environment.MachineName)}={Environment.MachineName}, {nameof(settings.NameFile)} ={settings.NameFile}");
+                $"Apply Settings: {nameof(settings.CountUserGen)} = {settings.CountUserGen}, {nameof(Environment.MachineName)} = {Environment.MachineName}, {nameof(settings.NameFile)} = {settings.NameFile}");
 
             var users = Enumerable.Range(1, settings.CountUserGen)
                 .Select(n => "user" + n).ToList();
