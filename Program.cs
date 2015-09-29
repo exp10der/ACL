@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Configuration;
 using System.Diagnostics;
 using System.DirectoryServices;
@@ -29,19 +31,33 @@ namespace AclGen
 
             var sw = Stopwatch.StartNew();
 
-            users
-                .ForEach(n =>
+
+            var context = new ProgressContext<string>(users.Select(n =>
+            {
+                // Возможно надо добавить юзинги??
+                var ad = new DirectoryEntry("WinNT://" +
+                                            Environment.MachineName + ",computer");
+
+                var newUser = ad.Children.Add(n, "user");
+
+                newUser.Invoke("SetPassword", "Pa$$worD");
+                newUser.CommitChanges();
+                return n;
+            }));
+
+
+            context.UpdateProgress += (sender, e) =>
+            {
+                var currentPercentage = (e.Count*100)/users.Count;
+                if (currentPercentage != e.Count)
                 {
+                    Console.Clear();
+                    Console.WriteLine("Create user {0}%", currentPercentage);
+                }
+            };
 
-                    // Возможно надо обернуть в юзинги?
-                    var ad = new DirectoryEntry("WinNT://" +
-                                                Environment.MachineName + ",computer");
+            context.ToArray();
 
-                    var newUser = ad.Children.Add(n, "user");
-
-                    newUser.Invoke("SetPassword", "Pa$$worD");
-                    newUser.CommitChanges();
-                });
 
             sw.Stop();
             log.Debug($"Creating users took {sw.Elapsed}");
@@ -50,14 +66,74 @@ namespace AclGen
             var dSecurity = dInfo.GetAccessControl();
 
             sw.Start();
-            users.ForEach(
-                login =>
-                    dSecurity.AddAccessRule(new FileSystemAccessRule(login, FileSystemRights.FullControl,
-                        AccessControlType.Allow))
-                );
+
+            var addRule = new ProgressContext<string>(users);
+            addRule.UpdateProgress += (sender, e) =>
+            {
+                var currentPercentage = (e.Count*100)/users.Count;
+                if (currentPercentage != e.Count)
+                {
+                    Console.Clear();
+                    Console.WriteLine("Set rules {0}%", currentPercentage);
+                }
+            };
+
+
+            addRule.Select(login =>
+            {
+                dSecurity.AddAccessRule(new FileSystemAccessRule(login, FileSystemRights.FullControl,
+                    AccessControlType.Allow));
+                return login;
+            }).ToArray();
+
             dInfo.SetAccessControl(dSecurity);
             sw.Stop();
             log.Debug($"Setting rights took {sw.Elapsed}");
+        }
+
+        public class ProgressArgs : EventArgs
+        {
+            public ProgressArgs(int count)
+            {
+                Count = count;
+            }
+
+            public int Count { get; }
+        }
+
+        public class ProgressContext<T> : IEnumerable<T>
+        {
+            private readonly IEnumerable<T> source;
+
+            public ProgressContext(IEnumerable<T> source)
+            {
+                this.source = source;
+            }
+
+            public event EventHandler<ProgressArgs> UpdateProgress;
+
+            protected virtual void OnUpdateProgress(int count)
+            {
+                var handler = UpdateProgress;
+                handler?.Invoke(this, new ProgressArgs(count));
+            }
+
+            public IEnumerator<T> GetEnumerator()
+            {
+                var count = 0;
+                foreach (var item in source)
+                {
+                    // The yield holds execution until the next iteration,
+                    // so trigger the update event first.
+                    OnUpdateProgress(++count);
+                    yield return item;
+                }
+            }
+
+            IEnumerator IEnumerable.GetEnumerator()
+            {
+                return GetEnumerator();
+            }
         }
     }
 }
